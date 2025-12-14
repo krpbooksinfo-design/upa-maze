@@ -2,171 +2,141 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>ウパ迷路オンライン</title>
 <style>
-body{margin:0;font-family:sans-serif;background:#f0f0f0;display:flex;flex-direction:column;align-items:center;}
-#canvasWrap{position:relative;flex:1;width:100%;display:flex;justify-content:center;align-items:center;overflow:hidden;}
-canvas{background:#fff;}
-#controls{position:fixed;bottom:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:5px;background:#ddd;width:100%;box-sizing:border-box;}
-#controls button{width:50px;height:50px;font-size:24px;user-select:none;}
-#lookBtn{margin-top:5px;padding:8px;font-size:16px;user-select:none;}
-#compass{position:absolute;bottom:10px;right:10px;width:40px;height:40px;}
-#goalMessage{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-size:32px;color:red;display:none;text-align:center;}
-#retryBtn{margin-top:10px;font-size:20px;display:none;}
+html,body{margin:0;height:100%;overflow:hidden;background:#222}
+#wrap{height:100%;display:flex;flex-direction:column}
+#game{flex:1;display:flex;justify-content:center;align-items:center}
+canvas{background:#fff}
+#footer{
+  height:140px;background:#111;color:#fff;
+  display:flex;align-items:center;justify-content:center;gap:32px
+}
+.ctrl{
+  display:grid;
+  grid-template-columns:70px 70px 70px;
+  grid-template-rows:70px 70px;
+  gap:8px
+}
+button{
+  font-size:26px;border:none;border-radius:12px;
+  background:#444;color:#fff
+}
+#compass{
+  width:70px;height:70px;border:2px solid #fff;border-radius:50%;
+  position:relative
+}
+#needle{
+  position:absolute;left:50%;top:50%;
+  width:4px;height:30px;background:red;
+  transform-origin:bottom center;
+}
 </style>
 </head>
 <body>
-<h2>ウパ迷路オンライン</h2>
-<div id="canvasWrap">
-  <canvas id="mazeCanvas" width="400" height="400"></canvas>
-  <canvas id="compass" width="40" height="40"></canvas>
-  <div id="goalMessage">
-    ＧＯＡＬ！<br>
-    <button id="retryBtn">もう一度やる</button>
+<div id="wrap">
+  <div id="game">
+    <canvas id="cv" width="700" height="700"></canvas>
   </div>
-</div>
-<div id="controls">
-  <button id="up">↑</button>
-  <div style="display:flex;gap:4px;">
-    <button id="left">←</button>
-    <button id="down">↓</button>
-    <button id="right">→</button>
+  <div id="footer">
+    <div class="ctrl">
+      <div></div><button id="up">↑</button><div></div>
+      <button id="left">←</button><button id="down">↓</button><button id="right">→</button>
+    </div>
+    <div id="compass"><div id="needle"></div></div>
   </div>
-  <button id="lookBtn">辺りを見まわす</button>
 </div>
 
 <script>
-const canvas=document.getElementById('mazeCanvas');
-const ctx=canvas.getContext('2d');
-const compassCanvas=document.getElementById('compass');
-const compassCtx=compassCanvas.getContext('2d');
+/* ===== 極限難度・自動生成迷路 ===== */
+const W = 61, H = 61; // 奇数
+const maze = Array.from({length:H},()=>Array(W).fill(1));
 
-let mazeImg=new Image();
-mazeImg.src='maze.png'; // ここに迷路画像のパスを指定してください
-
-let player={x:0,y:0};
-let goal={x:399,y:399}; // 右下
-let viewRange=20;
-let lookAround=false;
-let offsetX=0, offsetY=0;
-
-mazeImg.onload=()=>{
-  canvas.width=mazeImg.width;
-  canvas.height=mazeImg.height;
-  player={x:0,y:0};
-  draw();
-};
-
-function isWall(x,y){
-  if(x<0||y<0||x>=canvas.width||y>=canvas.height) return true;
-  const p=ctx.getImageData(x,y,1,1).data;
-  return p[0]<80 && p[1]<80 && p[2]<80; // 黒っぽい色を壁に
-}
-
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  const range=lookAround?viewRange*3:viewRange;
-
-  // プレイヤー中心スクロール
-  offsetX=Math.max(Math.min(player.x - canvas.width/2, mazeImg.width - canvas.width),0);
-  offsetY=Math.max(Math.min(player.y - canvas.height/2, mazeImg.height - canvas.height),0);
-
-  const startX=Math.max(player.x-range,0);
-  const startY=Math.max(player.y-range,0);
-  const endX=Math.min(player.x+range,canvas.width);
-  const endY=Math.min(player.y+range,canvas.height);
-
-  ctx.drawImage(mazeImg,offsetX,offsetY,canvas.width,canvas.height,0,0,canvas.width,canvas.height);
-
-  // プレイヤー描画
-  ctx.fillStyle='red';
-  ctx.beginPath();
-  ctx.arc(player.x-offsetX,player.y-offsetY,5,0,Math.PI*2);
-  ctx.fill();
-
-  drawCompass();
-
-  // ゴール判定
-  if(Math.abs(player.x-goal.x)<5 && Math.abs(player.y-goal.y)<5){
-    document.getElementById('goalMessage').style.display='block';
+function shuffle(a){
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
   }
 }
 
+function carve(x,y){
+  const dirs=[[2,0],[-2,0],[0,2],[0,-2]];
+  shuffle(dirs);
+  for(const [dx,dy] of dirs){
+    const nx=x+dx, ny=y+dy;
+    if(ny>0 && ny<H-1 && nx>0 && nx<W-1 && maze[ny][nx]===1){
+      maze[ny][nx]=0;
+      maze[y+dy/2][x+dx/2]=0;
+      carve(nx,ny);
+    }
+  }
+}
+
+maze[1][1]=0;
+carve(1,1);
+const goal={x:W-2,y:H-2};
+maze[goal.y][goal.x]=0;
+
+/* ===== 描画・操作 ===== */
+const TILE = 30;
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+
+let px=1, py=1;
+
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const ox=cv.width/2-px*TILE-TILE/2;
+  const oy=cv.height/2-py*TILE-TILE/2;
+
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      if(maze[y][x]){
+        ctx.fillStyle="#000";
+        ctx.fillRect(x*TILE+ox,y*TILE+oy,TILE,TILE);
+      }
+    }
+  }
+
+  ctx.fillStyle="gold";
+  ctx.fillRect(goal.x*TILE+ox,goal.y*TILE+oy,TILE,TILE);
+
+  ctx.fillStyle="red";
+  ctx.beginPath();
+  ctx.arc(px*TILE+ox+TILE/2,py*TILE+oy+TILE/2,10,0,Math.PI*2);
+  ctx.fill();
+
+  const dx=goal.x-px, dy=goal.y-py;
+  const ang=Math.atan2(dy,dx)+Math.PI/2;
+  document.getElementById("needle").style.transform=
+    `translate(-50%,-100%) rotate(${ang}rad)`;
+}
+
 function move(dx,dy){
-  const newX=player.x+dx;
-  const newY=player.y+dy;
-  if(!isWall(newX,newY)){
-    player.x=newX;
-    player.y=newY;
+  const nx=px+dx, ny=py+dy;
+  if(maze[ny] && maze[ny][nx]===0){
+    px=nx; py=ny;
+    if(px===goal.x && py===goal.y){
+      alert("GOAL!!");
+      px=1; py=1;
+    }
     draw();
   }
 }
 
-// ボタン操作
-function setupButton(id,dx,dy){
-  const btn=document.getElementById(id);
-  let interval;
-  const startMove=()=>{move(dx,dy); interval=setInterval(()=>move(dx,dy),100);}
-  const stopMove=()=>{clearInterval(interval);}
-  btn.addEventListener('mousedown',startMove);
-  btn.addEventListener('mouseup',stopMove);
-  btn.addEventListener('mouseleave',stopMove);
-  btn.addEventListener('touchstart',e=>{e.preventDefault();startMove();});
-  btn.addEventListener('touchend',stopMove);
-}
+document.getElementById("up").onmousedown=()=>move(0,-1);
+document.getElementById("down").onmousedown=()=>move(0,1);
+document.getElementById("left").onmousedown=()=>move(-1,0);
+document.getElementById("right").onmousedown=()=>move(1,0);
 
-setupButton('up',0,-1);
-setupButton('down',0,1);
-setupButton('left',-1,0);
-setupButton('right',1,0);
-
-// スワイプ操作
-let touchStart={x:0,y:0};
-canvas.addEventListener('touchstart',e=>{touchStart={x:e.touches[0].clientX,y:e.touches[0].clientY}});
-canvas.addEventListener('touchend',e=>{
-  const dx=e.changedTouches[0].clientX-touchStart.x;
-  const dy=e.changedTouches[0].clientY-touchStart.y;
-  if(Math.abs(dx)>Math.abs(dy)){
-    if(dx>0) move(1,0); else move(-1,0);
-  } else {
-    if(dy>0) move(0,1); else move(0,-1);
-  }
+window.addEventListener("keydown",e=>{
+  if(e.key==="ArrowUp")move(0,-1);
+  if(e.key==="ArrowDown")move(0,1);
+  if(e.key==="ArrowLeft")move(-1,0);
+  if(e.key==="ArrowRight")move(1,0);
 });
 
-// 視界拡張ボタン
-const lookBtn=document.getElementById('lookBtn');
-lookBtn.addEventListener('touchstart',e=>{e.preventDefault();lookAround=true;draw();});
-lookBtn.addEventListener('touchend',()=>{lookAround=false;draw();});
-lookBtn.addEventListener('mousedown',()=>{lookAround=true;draw();});
-lookBtn.addEventListener('mouseup',()=>{lookAround=false;draw();});
-lookBtn.addEventListener('mouseleave',()=>{lookAround=false;draw();});
-
-// コンパス描画
-function drawCompass(){
-  compassCtx.clearRect(0,0,compassCanvas.width,compassCanvas.height);
-  const dx=goal.x-player.x;
-  const dy=goal.y-player.y;
-  const angle=Math.atan2(dy,dx);
-  compassCtx.save();
-  compassCtx.translate(compassCanvas.width/2,compassCanvas.height/2);
-  compassCtx.rotate(angle);
-  compassCtx.fillStyle='blue';
-  compassCtx.beginPath();
-  compassCtx.moveTo(0,-10);
-  compassCtx.lineTo(5,5);
-  compassCtx.lineTo(-5,5);
-  compassCtx.closePath();
-  compassCtx.fill();
-  compassCtx.restore();
-}
-
-// もう一度やるボタン
-document.getElementById('retryBtn').onclick=()=>{
-  player={x:0,y:0};
-  document.getElementById('goalMessage').style.display='none';
-  draw();
-}
+draw();
 </script>
 </body>
 </html>
